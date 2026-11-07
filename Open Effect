@@ -1,0 +1,170 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local mainGui = script:FindFirstAncestorOfClass("ScreenGui")
+local button = mainGui:WaitForChild("OpenButton", 10)
+
+-- hide the open button right away
+if button then
+	button.Visible = false
+end
+
+-- SETTINGS
+local COLOR_A = Color3.fromRGB(255, 40, 40)    -- red
+local COLOR_B = Color3.fromRGB(150, 60, 255)   -- violet
+local START_DELAY = 1              -- seconds to wait after the game starts
+local LAUNCH_TIME = 6              -- seconds the splash stays (counted from when the glow appears)
+local GLOW_SPEED = 2               -- red to violet pulse speed
+local DIM = 0.45                   -- darkness of the screen (1 = no dim, 0 = fully black)
+local TITLE = "Executor"
+local SUBTITLE = "Launching..."
+local TEXT_Y = 0.86                -- 0.5 = middle of the screen, higher number = lower
+
+-- how far each glow reaches in (fraction of the screen) and how strong it is at the very edge
+-- strength: 0 = full color at the edge, 1 = invisible
+local BOTTOM = { size = 0.42, strength = 0.05 }
+local TOP    = { size = 0.22, strength = 0.35 }
+local LEFT   = { size = 0.08, strength = 0.45 }
+local RIGHT  = { size = 0.08, strength = 0.45 }
+
+local BOTTOM_PULSE = COLOR_A:Lerp(COLOR_B, 0.35)  -- the bottom only shifts a little toward violet
+
+-- splash gui (its own ScreenGui so it sits on top of everything)
+local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local old = playerGui:FindFirstChild("LaunchSplash")
+if old then
+	old:Destroy()
+end
+
+task.wait(START_DELAY)
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "LaunchSplash"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 100
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+pcall(function()
+	gui.ScreenInsets = Enum.ScreenInsets.None
+end)
+gui.Parent = playerGui
+
+-- dark layer
+local dim = Instance.new("Frame")
+dim.Size = UDim2.fromScale(1, 1)
+dim.BackgroundColor3 = Color3.new(0, 0, 0)
+dim.BackgroundTransparency = 1
+dim.BorderSizePixel = 0
+dim.Parent = gui
+
+-- glow edges: a frame with a gradient that is solid at the screen edge and fades inward
+local glows = {}
+
+local function makeEdge(anchor, pos, size, rotation, strength, fromColor, toColor)
+	local f = Instance.new("Frame")
+	f.AnchorPoint = anchor
+	f.Position = pos
+	f.Size = size
+	f.BackgroundColor3 = fromColor
+	f.BackgroundTransparency = 1
+	f.BorderSizePixel = 0
+	f.Parent = gui
+
+	local g = Instance.new("UIGradient")
+	g.Rotation = rotation
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, strength),
+		NumberSequenceKeypoint.new(0.4, strength + (1 - strength) * 0.45),
+		NumberSequenceKeypoint.new(0.75, strength + (1 - strength) * 0.85),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	g.Parent = f
+
+	table.insert(glows, { frame = f, from = fromColor, to = toColor })
+end
+
+makeEdge(Vector2.new(0, 1), UDim2.fromScale(0, 1), UDim2.fromScale(1, BOTTOM.size), 270, BOTTOM.strength, COLOR_A, BOTTOM_PULSE)
+makeEdge(Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.fromScale(1, TOP.size), 90, TOP.strength, COLOR_B, COLOR_A)
+makeEdge(Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.fromScale(LEFT.size, 1), 0, LEFT.strength, COLOR_B, COLOR_A)
+makeEdge(Vector2.new(1, 0), UDim2.fromScale(1, 0), UDim2.fromScale(RIGHT.size, 1), 180, RIGHT.strength, COLOR_A, COLOR_B)
+
+local tStart = os.clock()
+
+-- fade in the dim and the glows, and start the color pulse
+TweenService:Create(dim, TweenInfo.new(0.8, Enum.EasingStyle.Sine), { BackgroundTransparency = DIM }):Play()
+for _, e in ipairs(glows) do
+	e.frame.BackgroundColor3 = e.from
+	TweenService:Create(
+		e.frame,
+		TweenInfo.new(GLOW_SPEED, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ BackgroundColor3 = e.to }
+	):Play()
+	TweenService:Create(e.frame, TweenInfo.new(0.8, Enum.EasingStyle.Sine), { BackgroundTransparency = 0 }):Play()
+end
+
+-- text
+local holder = Instance.new("Frame")
+holder.AnchorPoint = Vector2.new(0.5, 0.5)
+holder.Position = UDim2.new(0.5, 0, TEXT_Y, 12)
+holder.Size = UDim2.fromOffset(300, 56)
+holder.BackgroundTransparency = 1
+holder.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 32)
+title.BackgroundTransparency = 1
+title.Text = TITLE
+title.Font = Enum.Font.GothamBold
+title.TextSize = 26
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextTransparency = 1
+title.Parent = holder
+
+local sub = Instance.new("TextLabel")
+sub.Position = UDim2.fromOffset(0, 32)
+sub.Size = UDim2.new(1, 0, 0, 20)
+sub.BackgroundTransparency = 1
+sub.Text = SUBTITLE
+sub.Font = Enum.Font.GothamMedium
+sub.TextSize = 14
+sub.TextColor3 = Color3.fromRGB(215, 215, 222)
+sub.TextTransparency = 1
+sub.Parent = holder
+
+-- the text comes in a moment after the glow
+task.wait(0.5)
+local appear = TweenInfo.new(0.7, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+TweenService:Create(holder, appear, { Position = UDim2.fromScale(0.5, TEXT_Y) }):Play()
+TweenService:Create(title, appear, { TextTransparency = 0 }):Play()
+TweenService:Create(sub, appear, { TextTransparency = 0 }):Play()
+task.wait(0.8)
+
+-- the subtitle breathes while it waits
+local breathe = TweenService:Create(
+	sub,
+	TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ TextTransparency = 0.55 }
+)
+breathe:Play()
+
+-- wait until LAUNCH_TIME seconds have passed since the glow appeared
+task.wait(math.max(LAUNCH_TIME - (os.clock() - tStart), 0))
+
+-- everything fades out, the open button fades in
+breathe:Cancel()
+local out = TweenInfo.new(0.7, Enum.EasingStyle.Sine)
+TweenService:Create(dim, out, { BackgroundTransparency = 1 }):Play()
+for _, e in ipairs(glows) do
+	TweenService:Create(e.frame, out, { BackgroundTransparency = 1 }):Play()
+end
+TweenService:Create(title, out, { TextTransparency = 1 }):Play()
+TweenService:Create(sub, out, { TextTransparency = 1 }):Play()
+
+if button then
+	button.ImageTransparency = 1
+	button.Visible = true
+	TweenService:Create(button, TweenInfo.new(0.7, Enum.EasingStyle.Sine), { ImageTransparency = 0 }):Play()
+end
+
+task.wait(0.8)
+gui:Destroy()
