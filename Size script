@@ -1,0 +1,42 @@
+local TweenService = game:GetService("TweenService")
+
+local resizeButton = script.Parent
+local window = resizeButton.Parent
+local gui = window.Parent
+
+-- SETTINGS
+local BIG_SIZE = UDim2.fromScale(0.8, 0.8)
+local FULL_SIZE = UDim2.fromScale(1, 1)
+local RESIZE_TIME = 0.35
+
+-- let the gui cover the entire screen (top bar, notch, safe areas)
+gui.IgnoreGuiInset = true
+gui.ScreenInsets = Enum.ScreenInsets.None
+
+-- a UISizeConstraint would cap big and fullscreen, so lift it while resized
+local sizeLimit = window:FindFirstChildOfClass("UISizeConstraint")
+local originalMax = sizeLimit and sizeLimit.MaxSize
+
+window:GetAttributeChangedSignal("SizeIndex"):Connect(function()
+	if not sizeLimit then return end
+	if window:GetAttribute("SizeIndex") == 1 then
+		sizeLimit.MaxSize = originalMax
+	else
+		sizeLimit.MaxSize = Vector2.new(math.huge, math.huge)
+	end
+end)
+
+local function cycleSize()
+	if not window:GetAttribute("IsOpen") or window:GetAttribute("Busy") then return end
+
+	local sizeSteps = { window:GetAttribute("NormalSize"), BIG_SIZE, FULL_SIZE }
+	local index = window:GetAttribute("SizeIndex") % #sizeSteps + 1
+	window:SetAttribute("SizeIndex", index)
+
+	TweenService:Create(window, TweenInfo.new(RESIZE_TIME, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = sizeSteps[index],
+		Position = window:GetAttribute("OpenPos"),
+	}):Play()
+end
+
+resizeButton.Activated:Connect(cycleSize)
