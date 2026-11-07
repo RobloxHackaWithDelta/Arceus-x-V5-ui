@@ -1,0 +1,154 @@
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local window = script.Parent
+window.Active = true
+window.ClipsDescendants = true -- anything that leaves the frame gets hidden
+
+-- SETTINGS
+local LAG_STRENGTH = 1.2     -- higher = components trail further behind
+local CATCH_UP_SPEED = 8     -- higher = components catch up faster after you stop
+local MAX_LAG = 60           -- max pixels components can trail behind
+local EXCLUDE = {}           -- names to keep glued to the window, e.g. { "Title" }
+
+local dragging = false
+local startPos
+local dragStart = Vector2.zero
+local dragDelta = Vector2.zero
+local lastDelta = Vector2.zero
+local overButton = false
+
+local stepConn
+local moveConn
+
+local function isPress(input)
+	return input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+-- Presses on buttons (and text boxes) never start a drag
+local function watchObject(obj)
+	if obj:IsA("GuiButton") or obj:IsA("TextBox") then
+		obj.InputBegan:Connect(function(input)
+			if isPress(input) then
+				overButton = true
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						overButton = false
+					end
+				end)
+			end
+		end)
+	end
+end
+
+for _, obj in ipairs(window:GetDescendants()) do
+	watchObject(obj)
+end
+window.DescendantAdded:Connect(watchObject)
+
+-- Lagging components: remember each direct child's base position
+local basePositions = {}
+
+local function trackChild(child)
+	if child:IsA("GuiObject") and not table.find(EXCLUDE, child.Name) then
+		basePositions[child] = child.Position
+	end
+end
+
+for _, child in ipairs(window:GetChildren()) do
+	trackChild(child)
+end
+window.ChildAdded:Connect(trackChild)
+window.ChildRemoved:Connect(function(child)
+	basePositions[child] = nil
+end)
+
+-- Per-frame work. Only runs while dragging or settling, so idle cost is zero.
+local lagX, lagY = 0, 0
+
+local function step(dt)
+	if dragging then
+		-- move the window once per frame instead of once per input event
+		window.Position = UDim2.new(
+			startPos.X.Scale, startPos.X.Offset + dragDelta.X,
+			startPos.Y.Scale, startPos.Y.Offset + dragDelta.Y
+		)
+		local moved = dragDelta - lastDelta
+		lastDelta = dragDelta
+		lagX = math.clamp(lagX - moved.X * LAG_STRENGTH, -MAX_LAG, MAX_LAG)
+		lagY = math.clamp(lagY - moved.Y * LAG_STRENGTH, -MAX_LAG, MAX_LAG)
+	end
+
+	-- ease back toward zero
+	local k = 1 - math.min(1, dt * CATCH_UP_SPEED)
+	lagX = lagX * k
+	lagY = lagY * k
+
+	if math.abs(lagX) > 0.05 or math.abs(lagY) > 0.05 then
+		for child, base in pairs(basePositions) do
+			child.Position = UDim2.new(
+				base.X.Scale, base.X.Offset + lagX,
+				base.Y.Scale, base.Y.Offset + lagY
+			)
+		end
+	elseif not dragging then
+		-- settle exactly on the base positions and stop the loop
+		lagX, lagY = 0, 0
+		for child, base in pairs(basePositions) do
+			child.Position = base
+		end
+		if stepConn then
+			stepConn:Disconnect()
+			stepConn = nil
+		end
+	end
+end
+
+local function startDrag(input, pressPos, pressWindowPos)
+	dragging = true
+	dragStart = Vector2.new(pressPos.X, pressPos.Y)
+	startPos = pressWindowPos
+	dragDelta = Vector2.zero
+	lastDelta = Vector2.zero
+
+	if not stepConn then
+		stepConn = RunService.RenderStepped:Connect(step)
+	end
+
+	-- listen for movement only while dragging
+	moveConn = UserInputService.InputChanged:Connect(function(changed)
+		if changed.UserInputType == Enum.UserInputType.MouseMovement
+			or changed.UserInputType == Enum.UserInputType.Touch then
+			dragDelta = Vector2.new(changed.Position.X, changed.Position.Y) - dragStart
+		end
+	end)
+
+	input.Changed:Connect(function()
+		if input.UserInputState == Enum.UserInputState.End then
+			dragging = false
+			if moveConn then
+				moveConn:Disconnect()
+				moveConn = nil
+			end
+		end
+	end)
+end
+
+-- Start drag from anywhere on the window that is not a button
+window.InputBegan:Connect(function(input)
+	if not isPress(input) then return end
+
+	local pressPos = input.Position
+	local pressWindowPos = window.Position
+
+	-- wait one step so the button check above can run first
+	task.defer(function()
+		if overButton then return end
+		if not window:GetAttribute("IsOpen") or window:GetAttribute("Busy") then return end
+		if window:GetAttribute("SizeIndex") == 3 then return end -- no dragging in fullscreen
+		if input.UserInputState == Enum.UserInputState.End then return end
+
+		startDrag(input, pressPos, pressWindowPos)
+	end)
+end)
