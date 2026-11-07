@@ -1,0 +1,125 @@
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local button = script.Parent
+local gui = button.Parent
+local window = gui:WaitForChild("Window")
+
+-- SETTINGS
+local COLOR_A = Color3.fromRGB(255, 40, 40)   -- red
+local COLOR_B = Color3.fromRGB(150, 60, 255)  -- violet
+local GLOW_SPEED = 1.5
+local SMALL_SCALE = 0.3
+local DRAG_THRESHOLD = 6
+
+-- Window setup
+window.AnchorPoint = Vector2.new(0.5, 0.5)
+local normalSize = window.Size
+local openPos = UDim2.fromScale(0.5, 0.5)
+local closedSize = UDim2.new(
+	normalSize.X.Scale * SMALL_SCALE, normalSize.X.Offset * SMALL_SCALE,
+	normalSize.Y.Scale * SMALL_SCALE, normalSize.Y.Offset * SMALL_SCALE
+)
+local closedPos = UDim2.fromScale(0.5, 1.4)
+
+-- Shared state (the other two scripts read these)
+window:SetAttribute("NormalSize", normalSize)
+window:SetAttribute("ClosedSize", closedSize)
+window:SetAttribute("ClosedPos", closedPos)
+window:SetAttribute("OpenPos", openPos)
+window:SetAttribute("IsOpen", false)
+window:SetAttribute("Busy", false)
+window:SetAttribute("SizeIndex", 1)
+button:SetAttribute("SavedPos", button.Position)
+
+window.Size = closedSize
+window.Position = closedPos
+window.Visible = false
+
+-- Glow button setup (image is the one you set in Studio)
+button.BackgroundTransparency = 1
+button.AutoButtonColor = false
+button.ImageTransparency = 0
+button.ImageColor3 = COLOR_A
+
+TweenService:Create(
+	button,
+	TweenInfo.new(GLOW_SPEED, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ ImageColor3 = COLOR_B }
+):Play()
+
+-- Open
+local function openWindow()
+	if window:GetAttribute("IsOpen") or window:GetAttribute("Busy") then return end
+	window:SetAttribute("IsOpen", true)
+	window:SetAttribute("Busy", true)
+	window:SetAttribute("SizeIndex", 1)
+
+	local savedPos = button.Position
+	button:SetAttribute("SavedPos", savedPos)
+
+	-- button goes down and fades out
+	local hideButton = TweenService:Create(button, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Position = savedPos + UDim2.fromOffset(0, 80),
+		ImageTransparency = 1,
+	})
+	hideButton:Play()
+	hideButton.Completed:Once(function()
+		button.Visible = false
+	end)
+
+	-- window comes up from the bottom, small to big, to the middle
+	window.Size = closedSize
+	window.Position = closedPos
+	window.Visible = true
+	local showWindow = TweenService:Create(window, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Position = openPos,
+		Size = normalSize,
+	})
+	showWindow:Play()
+	showWindow.Completed:Once(function()
+		window:SetAttribute("Busy", false)
+	end)
+end
+
+-- Dragging (mouse and touch). A tap without moving opens the window.
+local dragging = false
+local moved = false
+local dragStart
+local startPos
+
+button.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		moved = false
+		dragStart = input.Position
+		startPos = button.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+				if not moved then
+					openWindow()
+				end
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if not dragging then return end
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch then
+		local delta = input.Position - dragStart
+		if delta.Magnitude > DRAG_THRESHOLD then
+			moved = true
+		end
+		if moved then
+			button.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
+		end
+	end
+end)
